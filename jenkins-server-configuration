@@ -1,0 +1,271 @@
+Jenkins Server Configuration Guide
+================================
+
+1. System Configuration Files
+----------------------------
+A. Jenkins Configuration File (/etc/default/jenkins):
+   ```bash
+   # Jenkins home directory
+   JENKINS_HOME=/var/lib/jenkins
+
+   # Jenkins user
+   JENKINS_USER=jenkins
+
+   # Jenkins group
+   JENKINS_GROUP=jenkins
+
+   # Jenkins port
+   JENKINS_PORT=8080
+
+   # JVM options
+   JAVA_OPTS="-Xmx4g -Xms2g -XX:MaxPermSize=512m -XX:+UseG1GC -XX:+ExplicitGCInvokesConcurrent -XX:+UseStringDeduplication"
+
+   # Jenkins arguments
+   JENKINS_ARGS="--httpPort=-1 --httpsPort=8443 --httpsKeyStore=/etc/jenkins/ssl/jenkins.jks --httpsKeyStorePassword=your_secure_password"
+   ```
+
+B. Log Rotation Configuration (/etc/logrotate.d/jenkins):
+   ```
+   /var/log/jenkins/jenkins.log {
+       daily
+       rotate 7
+       compress
+       delaycompress
+       missingok
+       notifempty
+       create 0640 jenkins jenkins
+   }
+   ```
+
+2. Security Configuration
+------------------------
+A. SSL/TLS Setup:
+   ```bash
+   # Create SSL directory
+   sudo mkdir -p /etc/jenkins/ssl
+
+   # Generate SSL certificate
+   sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+     -keyout /etc/jenkins/ssl/jenkins.key \
+     -out /etc/jenkins/ssl/jenkins.crt
+
+   # Set proper permissions
+   sudo chmod 600 /etc/jenkins/ssl/jenkins.key
+   sudo chmod 644 /etc/jenkins/ssl/jenkins.crt
+   sudo chown -R jenkins:jenkins /etc/jenkins/ssl
+   ```
+
+B. Firewall Configuration:
+   ```bash
+   # Allow Jenkins ports
+   sudo ufw allow 8080/tcp  # HTTP
+   sudo ufw allow 8443/tcp  # HTTPS
+   sudo ufw allow 22/tcp    # SSH
+   sudo ufw enable
+   ```
+
+3. Jenkins Global Configuration
+-----------------------------
+A. Configure System (Manage Jenkins > Configure System):
+   ```groovy
+   // System Message
+   Jenkins CI/CD Server
+
+   // Number of executors
+   4
+
+   // Build History
+   - Discard old builds: true
+   - Days to keep builds: 30
+   - Max # of builds to keep: 50
+
+   // Global properties
+   - Environment variables:
+     JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+     MAVEN_HOME=/usr/share/maven
+     GRADLE_HOME=/usr/share/gradle
+   ```
+
+B. Configure Global Tools:
+   ```groovy
+   // JDK installations
+   - Name: JDK11
+   - JAVA_HOME: /usr/lib/jvm/java-11-openjdk-amd64
+
+   // Git installations
+   - Name: Default
+   - Path to Git executable: /usr/bin/git
+
+   // Maven installations
+   - Name: Maven3
+   - MAVEN_HOME: /usr/share/maven
+   ```
+
+4. Plugin Configuration
+----------------------
+A. Essential Plugins:
+   ```groovy
+   // Version Control
+   - Git plugin
+   - GitHub Integration
+   - Bitbucket Integration
+
+   // Build Tools
+   - Pipeline
+   - Blue Ocean
+   - Docker Pipeline
+   - Maven Integration
+   - Gradle Integration
+
+   // Security
+   - Role-based Authorization Strategy
+   - Credentials Binding
+   - SSH Agent
+   - OWASP Dependency Check
+
+   // Notifications
+   - Email Extension
+   - Slack Notification
+   - Teams Notification
+
+   // Monitoring
+   - Monitoring
+   - Metrics
+   - Prometheus
+   ```
+
+5. Backup Configuration
+----------------------
+A. ThinBackup Plugin Configuration:
+   ```groovy
+   // Backup Settings
+   - Backup directory: /var/lib/jenkins/backup
+   - Backup schedule: 0 2 * * * (Daily at 2 AM)
+   - Full backup schedule: 0 2 * * 0 (Weekly on Sunday at 2 AM)
+   - Backup type: Full
+   - Clean up differential backups: true
+   - Move old backups to ZIP file: true
+   - Exclude files: .git, .svn, target, node_modules
+   ```
+
+6. Email Configuration
+---------------------
+A. SMTP Configuration:
+   ```groovy
+   // Email Settings
+   - SMTP server: smtp.gmail.com
+   - SMTP port: 587
+   - Use SSL: true
+   - Use TLS: true
+   - Username: your-email@gmail.com
+   - Password: your-app-specific-password
+   - Default recipient: jenkins-admin@yourdomain.com
+   - Default subject: Jenkins Build Notification
+   ```
+
+7. Pipeline Configuration
+------------------------
+A. Global Pipeline Libraries:
+   ```groovy
+   // Shared Libraries
+   - Name: shared-library
+   - Default version: main
+   - Retrieval method: Modern SCM
+   - Source Code Management: Git
+   - Project repository: https://github.com/your-org/shared-library.git
+   ```
+
+8. Monitoring Configuration
+--------------------------
+A. Prometheus Configuration:
+   ```groovy
+   // Prometheus Settings
+   - Enable Prometheus: true
+   - Path: /prometheus
+   - Authentication: false
+   - Metrics:
+     - System metrics
+     - Build metrics
+     - Plugin metrics
+   ```
+
+9. Security Settings
+-------------------
+A. Global Security Configuration:
+   ```groovy
+   // Security Settings
+   - Enable security: true
+   - Security realm: Jenkins' own user database
+   - Authorization: Role-based strategy
+   - CSRF Protection: true
+   - Agent to master security: true
+   ```
+
+10. Performance Tuning
+---------------------
+A. JVM Options:
+   ```bash
+   # Add to /etc/default/jenkins
+   JAVA_OPTS="-Xmx4g -Xms2g \
+     -XX:MaxPermSize=512m \
+     -XX:+UseG1GC \
+     -XX:+ExplicitGCInvokesConcurrent \
+     -XX:+UseStringDeduplication \
+     -XX:+DisableExplicitGC \
+     -XX:+UseCompressedOops \
+     -XX:+UseLargePages \
+     -XX:+AggressiveOpts"
+   ```
+
+11. Build Optimization
+---------------------
+A. Workspace Cleanup:
+   ```groovy
+   // Workspace Cleanup
+   - Delete workspace before build: false
+   - Clean workspace after build: true
+   - Clean workspace before checkout: false
+   ```
+
+B. Artifact Management:
+   ```groovy
+   // Artifact Settings
+   - Keep artifacts for: 30 days
+   - Max artifacts to keep: 100
+   - Compress artifacts: true
+   ```
+
+12. Maintenance Scripts
+----------------------
+A. Backup Script (/usr/local/bin/backup-jenkins.sh):
+   ```bash
+   #!/bin/bash
+   BACKUP_DIR="/var/lib/jenkins/backup"
+   DATE=$(date +%Y%m%d)
+   
+   # Create backup
+   tar -czf $BACKUP_DIR/jenkins-backup-$DATE.tar.gz /var/lib/jenkins
+   
+   # Remove old backups (older than 30 days)
+   find $BACKUP_DIR -name "jenkins-backup-*.tar.gz" -mtime +30 -delete
+   ```
+
+B. Cleanup Script (/usr/local/bin/cleanup-jenkins.sh):
+   ```bash
+   #!/bin/bash
+   JENKINS_HOME="/var/lib/jenkins"
+   
+   # Clean old builds
+   find $JENKINS_HOME/jobs -type d -name "builds" -exec rm -rf {} \;
+   
+   # Clean workspace
+   find $JENKINS_HOME/workspace -type d -mtime +7 -exec rm -rf {} \;
+   ```
+
+Remember to:
+1. Replace placeholder values (passwords, email addresses, etc.)
+2. Adjust resource allocations based on your server capacity
+3. Test all configurations in a staging environment first
+4. Document any custom configurations
+5. Regularly review and update security settings
+6. Monitor system resources and adjust configurations as needed 
