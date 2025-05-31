@@ -258,3 +258,252 @@ Remember to:
 - Keep Jenkins and plugins updated
 - Review security logs
 - Test restore procedures periodically 
+
+pipeline {
+    agent any
+
+    environment {
+        // Docker registry configuration
+        DOCKER_REGISTRY = 'your-registry.com'
+        
+        // Application versions
+        JAVA_APP_VERSION = '1.0.0'
+        NODE_APP_VERSION = '1.0.0'
+        PYTHON_APP_VERSION = '1.0.0'
+        REACT_APP_VERSION = '1.0.0'
+        
+        // Application names
+        JAVA_APP_NAME = 'java-app'
+        NODE_APP_NAME = 'node-app'
+        PYTHON_APP_NAME = 'python-app'
+        REACT_APP_NAME = 'react-app'
+    }
+
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['development', 'staging', 'production'],
+            description: 'Select deployment environment'
+        )
+        string(
+            name: 'VERSION',
+            defaultValue: '1.0.0',
+            description: 'Application version to deploy'
+        )
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Build Applications') {
+            parallel {
+                stage('Build Java App') {
+                    steps {
+                        dir('java-app') {
+                            sh 'mvn clean package -DskipTests'
+                        }
+                    }
+                }
+                stage('Build Node.js App') {
+                    steps {
+                        dir('node-app') {
+                            sh 'npm install'
+                        }
+                    }
+                }
+                stage('Build Python App') {
+                    steps {
+                        dir('python-app') {
+                            sh 'pip install -r requirements.txt'
+                        }
+                    }
+                }
+                stage('Build React App') {
+                    steps {
+                        dir('react-app') {
+                            sh 'npm install'
+                            sh 'npm run build'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Test Applications') {
+            parallel {
+                stage('Test Java App') {
+                    steps {
+                        dir('java-app') {
+                            sh 'mvn test'
+                        }
+                    }
+                }
+                stage('Test Node.js App') {
+                    steps {
+                        dir('node-app') {
+                            sh 'npm test'
+                        }
+                    }
+                }
+                stage('Test Python App') {
+                    steps {
+                        dir('python-app') {
+                            sh 'python -m pytest'
+                        }
+                    }
+                }
+                stage('Test React App') {
+                    steps {
+                        dir('react-app') {
+                            sh 'npm test'
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Build Docker Images') {
+            steps {
+                script {
+                    // Build and tag images for all environments
+                    sh """
+                        docker build -t ${DOCKER_REGISTRY}/${JAVA_APP_NAME}:${params.VERSION} ./java-app
+                        docker build -t ${DOCKER_REGISTRY}/${NODE_APP_NAME}:${params.VERSION} ./node-app
+                        docker build -t ${DOCKER_REGISTRY}/${PYTHON_APP_NAME}:${params.VERSION} ./python-app
+                        docker build -t ${DOCKER_REGISTRY}/${REACT_APP_NAME}:${params.VERSION} ./react-app
+                    """
+                }
+            }
+        }
+
+        stage('Push Docker Images') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'docker-registry-credentials', 
+                                                    passwordVariable: 'DOCKER_PASSWORD', 
+                                                    usernameVariable: 'DOCKER_USERNAME')]) {
+                        sh "docker login ${DOCKER_REGISTRY} -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}"
+                        
+                        sh """
+                            docker push ${DOCKER_REGISTRY}/${JAVA_APP_NAME}:${params.VERSION}
+                            docker push ${DOCKER_REGISTRY}/${NODE_APP_NAME}:${params.VERSION}
+                            docker push ${DOCKER_REGISTRY}/${PYTHON_APP_NAME}:${params.VERSION}
+                            docker push ${DOCKER_REGISTRY}/${REACT_APP_NAME}:${params.VERSION}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Environment') {
+            steps {
+                script {
+                    // Load environment-specific configuration
+                    def envConfig = loadEnvironmentConfig(params.ENVIRONMENT)
+                    
+                    // Deploy to selected environment
+                    switch(params.ENVIRONMENT) {
+                        case 'development':
+                            deployToDevelopment(envConfig)
+                            break
+                        case 'staging':
+                            deployToStaging(envConfig)
+                            break
+                        case 'production':
+                            deployToProduction(envConfig)
+                            break
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+        success {
+            echo "Pipeline completed successfully for environment: ${params.ENVIRONMENT}"
+            emailext (
+                subject: "Deployment Successful: ${currentBuild.fullDisplayName}",
+                body: "Deployment to ${params.ENVIRONMENT} completed successfully. Version: ${params.VERSION}",
+                to: 'team@example.com'
+            )
+        }
+        failure {
+            echo "Pipeline failed for environment: ${params.ENVIRONMENT}"
+            emailext (
+                subject: "Deployment Failed: ${currentBuild.fullDisplayName}",
+                body: "Deployment to ${params.ENVIRONMENT} failed. Version: ${params.VERSION}",
+                to: 'team@example.com'
+            )
+        }
+    }
+}
+
+// Helper functions for environment-specific deployments
+def loadEnvironmentConfig(String environment) {
+    def config = [
+        development: [
+            namespace: 'dev',
+            replicas: 1,
+            resources: [cpu: '0.5', memory: '512Mi'],
+            domain: 'dev.example.com'
+        ],
+        staging: [
+            namespace: 'staging',
+            replicas: 2,
+            resources: [cpu: '1', memory: '1Gi'],
+            domain: 'staging.example.com'
+        ],
+        production: [
+            namespace: 'prod',
+            replicas: 3,
+            resources: [cpu: '2', memory: '2Gi'],
+            domain: 'example.com'
+        ]
+    ]
+    return config[environment]
+}
+
+def deployToDevelopment(config) {
+    sh """
+        kubectl config use-context development
+        kubectl apply -f k8s/development/
+        kubectl set image deployment/${JAVA_APP_NAME} ${JAVA_APP_NAME}=${DOCKER_REGISTRY}/${JAVA_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${NODE_APP_NAME} ${NODE_APP_NAME}=${DOCKER_REGISTRY}/${NODE_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${PYTHON_APP_NAME} ${PYTHON_APP_NAME}=${DOCKER_REGISTRY}/${PYTHON_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${REACT_APP_NAME} ${REACT_APP_NAME}=${DOCKER_REGISTRY}/${REACT_APP_NAME}:${params.VERSION} -n ${config.namespace}
+    """
+}
+
+def deployToStaging(config) {
+    sh """
+        kubectl config use-context staging
+        kubectl apply -f k8s/staging/
+        kubectl set image deployment/${JAVA_APP_NAME} ${JAVA_APP_NAME}=${DOCKER_REGISTRY}/${JAVA_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${NODE_APP_NAME} ${NODE_APP_NAME}=${DOCKER_REGISTRY}/${NODE_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${PYTHON_APP_NAME} ${PYTHON_APP_NAME}=${DOCKER_REGISTRY}/${PYTHON_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${REACT_APP_NAME} ${REACT_APP_NAME}=${DOCKER_REGISTRY}/${REACT_APP_NAME}:${params.VERSION} -n ${config.namespace}
+    """
+}
+
+def deployToProduction(config) {
+    // Add approval step for production deployment
+    timeout(time: 1, unit: 'HOURS') {
+        input message: 'Approve production deployment?'
+    }
+    
+    sh """
+        kubectl config use-context production
+        kubectl apply -f k8s/production/
+        kubectl set image deployment/${JAVA_APP_NAME} ${JAVA_APP_NAME}=${DOCKER_REGISTRY}/${JAVA_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${NODE_APP_NAME} ${NODE_APP_NAME}=${DOCKER_REGISTRY}/${NODE_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${PYTHON_APP_NAME} ${PYTHON_APP_NAME}=${DOCKER_REGISTRY}/${PYTHON_APP_NAME}:${params.VERSION} -n ${config.namespace}
+        kubectl set image deployment/${REACT_APP_NAME} ${REACT_APP_NAME}=${DOCKER_REGISTRY}/${REACT_APP_NAME}:${params.VERSION} -n ${config.namespace}
+    """
+} 
